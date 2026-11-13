@@ -23,6 +23,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, SetParameter, SetRemap
 from launch_ros.descriptions import ParameterFile
+from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import HasNodeParams, RewrittenYaml
 
 
@@ -34,6 +35,11 @@ def generate_launch_description():
     autostart = LaunchConfiguration('autostart')
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
+    use_lifelong = LaunchConfiguration('use_lifelong')
+    load_previous_map = LaunchConfiguration('load_previous_map')
+    map_save_dir = LaunchConfiguration('map_save_dir')
+    map_file_prefix = LaunchConfiguration('map_file_prefix')
+    autosave_interval = LaunchConfiguration('autosave_interval')
 
     # Variables
     lifecycle_nodes = ['map_saver']
@@ -42,6 +48,7 @@ def generate_launch_description():
     bringup_dir = get_package_share_directory('chassis_bringup')
     slam_toolbox_dir = get_package_share_directory('slam_toolbox')
     slam_launch_file = os.path.join(slam_toolbox_dir, 'launch', 'online_sync_launch.py')
+    lifelong_params_file = os.path.join(bringup_dir, 'params', 'slam_lifelong_params.yaml')
 
     # Create our own temporary YAML files that include substitutions
     configured_params = ParameterFile(
@@ -87,6 +94,36 @@ def generate_launch_description():
         'log_level', default_value='info', description='log level'
     )
 
+    declare_use_lifelong_cmd = DeclareLaunchArgument(
+        'use_lifelong',
+        default_value='False',
+        description='Use slam_toolbox lifelong mapping instead of online sync mapping',
+    )
+
+    declare_load_previous_map_cmd = DeclareLaunchArgument(
+        'load_previous_map',
+        default_value='False',
+        description='Load the previous posegraph and continue lifelong mapping',
+    )
+
+    declare_map_save_dir_cmd = DeclareLaunchArgument(
+        'map_save_dir',
+        default_value='~/.ros/chassis_slam',
+        description='Directory used to store/load lifelong maps',
+    )
+
+    declare_map_file_prefix_cmd = DeclareLaunchArgument(
+        'map_file_prefix',
+        default_value='chassis_map',
+        description='Map file prefix without extension',
+    )
+
+    declare_autosave_interval_cmd = DeclareLaunchArgument(
+        'autosave_interval',
+        default_value='30.0',
+        description='Autosave interval in seconds; 0 disables autosave',
+    )
+
     # Nodes launching commands
     start_map_server = GroupAction(
         actions=[
@@ -119,7 +156,7 @@ def generate_launch_description():
     )
 
     start_slam_toolbox_cmd = GroupAction(
-
+        condition=UnlessCondition(use_lifelong),
         actions=[
             # Remapping required to have a slam session subscribe & publish in optional namespaces
             SetRemap(src='/scan', dst='scan'),
@@ -142,6 +179,49 @@ def generate_launch_description():
         ]
     )
 
+    # 终身建图分支：从零开始或加载上次 posegraph，并挂一个定时存图节点。
+    # 原 online_sync 分支已被 UnlessCondition(use_lifelong) 包住，两者互斥。
+    start_lifelong_slam_cmd = GroupAction(
+        condition=IfCondition(use_lifelong),
+        actions=[
+            SetRemap(src='/scan', dst='scan'),
+            SetRemap(src='/tf', dst='tf'),
+            SetRemap(src='/tf_static', dst='tf_static'),
+            SetRemap(src='/map', dst='map'),
+
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(bringup_dir, 'launch', 'slam_toolbox_lifelong_launch.py')
+                ),
+                launch_arguments={
+                    'use_sim_time': use_sim_time,
+                    'autostart': autostart,
+                    'slam_params_file': lifelong_params_file,
+                    'load_previous_map': load_previous_map,
+                    'map_save_dir': map_save_dir,
+                    'map_file_prefix': map_file_prefix,
+                }.items(),
+            ),
+
+            Node(
+                package='chassis_bringup',
+                executable='slam_map_autosave.py',
+                name='slam_map_autosave',
+                output='screen',
+                parameters=[{
+                    'save_dir': map_save_dir,
+                    'map_file_prefix': map_file_prefix,
+                    # LaunchConfiguration 取出来是字符串，这里显式转成 float，
+                    # 否则节点参数类型会变成 string。
+                    'interval': ParameterValue(
+                        autosave_interval, value_type=float),
+                    # 用墙钟：Gazebo 暂停时也继续保存。
+                    'use_sim_time': False,
+                }],
+            ),
+        ],
+    )
+
     ld = LaunchDescription()
 
     # Declare the launch options
@@ -151,11 +231,17 @@ def generate_launch_description():
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
+    ld.add_action(declare_use_lifelong_cmd)
+    ld.add_action(declare_load_previous_map_cmd)
+    ld.add_action(declare_map_save_dir_cmd)
+    ld.add_action(declare_map_file_prefix_cmd)
+    ld.add_action(declare_autosave_interval_cmd)
 
     # Running Map Saver Server
     ld.add_action(start_map_server)
 
     # Running SLAM Toolbox (Only one of them will be run)
     ld.add_action(start_slam_toolbox_cmd)
+    ld.add_action(start_lifelong_slam_cmd)
 
     return ld

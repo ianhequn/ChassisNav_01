@@ -21,6 +21,7 @@ from launch.actions import (
     DeclareLaunchArgument,
     GroupAction,
     IncludeLaunchDescription,
+    LogInfo,
     SetEnvironmentVariable,
 )
 from launch.conditions import IfCondition
@@ -49,6 +50,11 @@ def generate_launch_description():
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
     use_localization = LaunchConfiguration('use_localization')
+    use_lifelong = LaunchConfiguration('use_lifelong')
+    load_previous_map = LaunchConfiguration('load_previous_map')
+    map_save_dir = LaunchConfiguration('map_save_dir')
+    map_file_prefix = LaunchConfiguration('map_file_prefix')
+    autosave_interval = LaunchConfiguration('autosave_interval')
 
     # Map fully qualified names to relative ones so the node's namespace can be prepended.
     # In case of the transforms (tf), currently, there doesn't seem to be a better alternative
@@ -139,9 +145,45 @@ def generate_launch_description():
         'log_level', default_value='info', description='log level'
     )
 
+    declare_use_lifelong_cmd = DeclareLaunchArgument(
+        'use_lifelong',
+        default_value='False',
+        description='Use slam_toolbox lifelong mapping instead of online sync mapping',
+    )
+
+    declare_load_previous_map_cmd = DeclareLaunchArgument(
+        'load_previous_map',
+        default_value='False',
+        description='Load the previous posegraph and continue lifelong mapping',
+    )
+
+    declare_map_save_dir_cmd = DeclareLaunchArgument(
+        'map_save_dir',
+        default_value='~/.ros/chassis_slam',
+        description='Directory used to store/load lifelong maps',
+    )
+
+    declare_map_file_prefix_cmd = DeclareLaunchArgument(
+        'map_file_prefix',
+        default_value='chassis_map',
+        description='Map file prefix without extension',
+    )
+
+    declare_autosave_interval_cmd = DeclareLaunchArgument(
+        'autosave_interval',
+        default_value='30.0',
+        description='Autosave interval in seconds; 0 disables autosave',
+    )
+
     # Specify the actions
     bringup_cmd_group = GroupAction(
         [
+            LogInfo(
+                condition=IfCondition(PythonExpression(
+                    ['not ', slam, ' and ', use_lifelong])),
+                msg='[chassis_bringup] use_lifelong:=True is ignored '
+                    'because slam:=False',
+            ),
             PushROSNamespace(condition=IfCondition(use_namespace), namespace=namespace),
             Node(
                 condition=IfCondition(use_composition),
@@ -164,6 +206,11 @@ def generate_launch_description():
                     'autostart': autostart,
                     'use_respawn': use_respawn,
                     'params_file': params_file,
+                    'use_lifelong': use_lifelong,
+                    'load_previous_map': load_previous_map,
+                    'map_save_dir': map_save_dir,
+                    'map_file_prefix': map_file_prefix,
+                    'autosave_interval': autosave_interval,
                 }.items(),
             ),
             IncludeLaunchDescription(
@@ -217,6 +264,11 @@ def generate_launch_description():
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
     ld.add_action(declare_use_localization_cmd)
+    ld.add_action(declare_use_lifelong_cmd)
+    ld.add_action(declare_load_previous_map_cmd)
+    ld.add_action(declare_map_save_dir_cmd)
+    ld.add_action(declare_map_file_prefix_cmd)
+    ld.add_action(declare_autosave_interval_cmd)
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(bringup_cmd_group)

@@ -26,4 +26,8 @@ endif()
 install(DIRECTORY launch params rviz maps
   DESTINATION share/${PROJECT_NAME})
 
+# 自动存图节点（rclpy 脚本，必须用 PROGRAMS 安装并保留可执行权限）
+install(PROGRAMS scripts/slam_map_autosave.py
+  DESTINATION lib/${PROJECT_NAME})
+
 ament_package()

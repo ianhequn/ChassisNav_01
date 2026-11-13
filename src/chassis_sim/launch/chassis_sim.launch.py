@@ -68,6 +68,11 @@ def generate_launch_description():
     autostart = LaunchConfiguration('autostart')            # 是否自动把 Nav2 节点从“未配置”拉到“已激活”
     use_composition = LaunchConfiguration('use_composition')# 是否把所有 Nav2 节点塞进一个进程（省内存）
     use_respawn = LaunchConfiguration('use_respawn')        # 节点挂了是否自动重启（只在非 composition 时有效）
+    use_lifelong = LaunchConfiguration('use_lifelong')      # 是否启用 slam_toolbox 终身建图
+    load_previous_map = LaunchConfiguration('load_previous_map')  # 是否加载上次的 posegraph 续建
+    map_save_dir = LaunchConfiguration('map_save_dir')      # 终身建图存档目录
+    map_file_prefix = LaunchConfiguration('map_file_prefix')  # 存档文件名前缀（不含扩展名）
+    autosave_interval = LaunchConfiguration('autosave_interval')  # 自动保存间隔（秒）
 
     # ↓ 这几个是“仿真专属”的参数
     rviz_config_file = LaunchConfiguration('rviz_config_file')  # RViz 用哪个 .rviz 布局文件
@@ -159,6 +164,37 @@ def generate_launch_description():
         'use_respawn',
         default_value='False',
         description='Whether to respawn if a node crashes. Applied when composition is disabled.',
+    )
+
+    # 终身建图参数：默认全部关闭，保证不带这些参数时行为与原版完全一致
+    declare_use_lifelong_cmd = DeclareLaunchArgument(
+        'use_lifelong',
+        default_value='False',
+        description='Use slam_toolbox lifelong mapping instead of online sync mapping',
+    )
+
+    declare_load_previous_map_cmd = DeclareLaunchArgument(
+        'load_previous_map',
+        default_value='False',
+        description='Load the previous posegraph and continue lifelong mapping',
+    )
+
+    declare_map_save_dir_cmd = DeclareLaunchArgument(
+        'map_save_dir',
+        default_value='~/.ros/chassis_slam',
+        description='Directory used to store/load lifelong maps',
+    )
+
+    declare_map_file_prefix_cmd = DeclareLaunchArgument(
+        'map_file_prefix',
+        default_value='chassis_map',
+        description='Map file prefix without extension',
+    )
+
+    declare_autosave_interval_cmd = DeclareLaunchArgument(
+        'autosave_interval',
+        default_value='30.0',
+        description='Autosave interval in seconds; 0 disables autosave',
     )
 
     # 声明 RViz 配置文件路径：默认 chassis_bringup/rviz/nav2_default_view.rviz
@@ -265,6 +301,11 @@ def generate_launch_description():
             'autostart': autostart,
             'use_composition': use_composition,
             'use_respawn': use_respawn,
+            'use_lifelong': use_lifelong,
+            'load_previous_map': load_previous_map,
+            'map_save_dir': map_save_dir,
+            'map_file_prefix': map_file_prefix,
+            'autosave_interval': autosave_interval,
         }.items(),
     )
     # The SDF file for the world is a xacro file because we wanted to
@@ -359,6 +400,11 @@ def generate_launch_description():
     ld.add_action(declare_robot_name_cmd)
     ld.add_action(declare_robot_sdf_cmd)
     ld.add_action(declare_use_respawn_cmd)
+    ld.add_action(declare_use_lifelong_cmd)
+    ld.add_action(declare_load_previous_map_cmd)
+    ld.add_action(declare_map_save_dir_cmd)
+    ld.add_action(declare_map_file_prefix_cmd)
+    ld.add_action(declare_autosave_interval_cmd)
 
     # 然后按顺序放“真正干活”的动作
     ld.add_action(world_sdf_xacro)     # 1. 展开 world 成临时 sdf（会等它跑完）
